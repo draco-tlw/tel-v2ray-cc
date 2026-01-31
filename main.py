@@ -26,65 +26,68 @@ client = TelegramClient(SESSION_NAME, API_ID, API_HASH, proxy=PROXY_CONF)
 
 
 CONFIG_PATTERN = r"(?:vmess|vless|trojan|ss|tuic|hysteria2?)://[a-zA-Z0-9\-_@.:?=&%#]+"
+MAX_CONCURRENT_SCANS = 5
+
+
+async def scan_channels(
+    client: TelegramClient,
+    channel: str,
+    start_date,
+    end_date,
+    semaphore: asyncio.Semaphore,
+):
+    async with semaphore:
+        channel_configs = set()
+
+        try:
+            entity = await client.get_input_entity(channel)
+
+            async for message in client.iter_messages(entity, offset_date=end_date):
+                if message.date < start_date:
+                    break
+
+                if message.text:
+                    found = re.findall(CONFIG_PATTERN, message.text)
+                    for config in found:
+                        renamed_config = renamer.rename_config(config, channel)
+                        channel_configs.add(renamed_config)
+
+            count = len(channel_configs)
+            if count > 0:
+                print(f"✓ {channel:<30} | Found: {count}")
+            else:
+                print(f"- {channel:<30} | Found: 0")
+
+            return channel_configs
+
+        except Exception as e:
+            error_msg = str(e).split("(")[0]  # Shorten error message
+            print(f"✗ {channel:<30} | Error: {error_msg}")
+            return set()
 
 
 async def collect(start_time_str: str, end_time_str: str):
     async with client:
         start_date, end_date = parse_date.parse_dates(start_time_str, end_time_str)
         print(f"--- Collecting Configs from {start_date} to {end_date} (UTC) ---")
-
-        collected_configs = set()
+        print("Scanning channels...")
 
         target_channels = read_channels.read_channels(TARGET_CHANNELS)
 
+        sem = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
+
+        tasks = []
         for channel in target_channels:
-            print(f"Scanning: {channel}...")
+            task = scan_channels(client, channel, start_date, end_date, sem)
+            tasks.append(task)
 
-            try:
-                # Get the channel entity
-                entity = await client.get_input_entity(channel)
+        results = await asyncio.gather(*tasks)
 
-                channel_configs = set()
+        collected_configs = set()
+        for channel_result in results:
+            collected_configs.update(channel_result)
 
-                # We start at the END date and walk backwards.
-                async for message in client.iter_messages(entity, offset_date=end_date):
-                    # STOP condition: If we go past the start date, stop checking this channel
-                    if message.date < start_date:
-                        break
-
-                    if message.text:
-                        # Find all matches in the message text
-                        found = re.findall(CONFIG_PATTERN, message.text)
-                        for config in found:
-                            renamed_config = renamer.rename_config(config, channel)
-                            channel_configs.add(renamed_config)
-
-                total_found = len(channel_configs)
-                new_configs = channel_configs - collected_configs
-                count_new = len(new_configs)
-                count_duplicates = total_found - count_new
-
-                collected_configs.update(new_configs)
-
-                if total_found > 0:
-                    print(
-                        f"   └── Found: {total_found} | New: {count_new} | Duplicates: {count_duplicates}"
-                    )
-                else:
-                    print("   └── No configs found.")
-
-            except Exception as e:
-                print(f"Error scanning {channel}: {e}")
-
-        print(f"\nScanning complete! Found {len(collected_configs)} unique configs.")
-
-        # Save to file
-        # with open("configs.txt", "w", encoding="utf-8") as f:
-        #     for config in collected_configs:
-        #         f.write(config + "\n")
-        #
-        # print("Saved to configs.txt")
-
+        print(f"\nScanning complete! Found {len(collected_configs)} configs.")
         return list(collected_configs)
 
 
@@ -114,7 +117,6 @@ def remove_duplicates(configs: list[str]):
 
 
 async def main():
-
     print("Enter the time window (YYYY-MM-DD-HH:mm)")
     start_str = input("start time: ")
     end_str = input("end time: ")
@@ -123,11 +125,11 @@ async def main():
 
     clean_configs = remove_duplicates(configs)
 
-    with open("clean-configs.txt", "w", encoding="utf-8") as f:
+    with open("configs.txt", "w", encoding="utf-8") as f:
         for config in clean_configs:
             f.write(config + "\n")
 
-    print("saved to clean-configs.txt")
+    print("saved to configs.txt")
 
 
 if __name__ == "__main__":
