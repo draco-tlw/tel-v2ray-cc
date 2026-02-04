@@ -20,6 +20,19 @@ def parse_dates(start_str, end_str):
     return start_utc, end_utc
 
 
+def parse_date(date_str: str):
+    fmt = "%Y-%m-%d-%H:%M"
+    tehran_tz = ZoneInfo("Asia/Tehran")
+
+    date_local = datetime.strptime(date_str, fmt)
+
+    date_tehran = date_local.replace(tzinfo=tehran_tz)
+
+    date_utc = date_tehran.astimezone(timezone.utc)
+
+    return date_utc
+
+
 if __name__ == "__main__":
     start, end = parse_dates("2025-01-23-12:00", "2025-01-23-18:00")
 
