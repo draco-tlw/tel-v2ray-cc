@@ -1,13 +1,14 @@
 import asyncio
 
 import aiohttp
+from aiohttp_socks import ProxyConnectionError, ProxyError, ProxyTimeoutError
 from bs4 import BeautifulSoup, Tag
 
 from services.parse_iso_date import parse_iso_date
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 PROXY_URL = "socks5://127.0.0.1:12334"
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 BASE_DELAY = 5
 
 
@@ -101,7 +102,13 @@ async def load_channel_messages(
                 # Hard Failure (404 Not Found, etc.)
                 else:
                     return None
-        except (aiohttp.ClientError, asyncio.TimeoutError):
+        except (
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
+            ProxyError,
+            ProxyConnectionError,
+            ProxyTimeoutError,
+        ):
             # Connection Dropped (IP Block often looks like this)
             wait_time = BASE_DELAY * (attempt + 1)
             print(f"! {channel:<30} | Connection Error. Retrying in {wait_time}s...")
