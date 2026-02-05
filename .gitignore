@@ -216,6 +216,7 @@ __marimo__/
 .streamlit/secrets.toml
 *.session
 configs.txt
+unique-configs.txt
 active_configs.txt
 active_configs_latency_test_results.csv
 found-channels.txt
