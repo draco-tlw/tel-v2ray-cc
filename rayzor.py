@@ -4,6 +4,7 @@ import sys
 from colorama import Fore, Style, init
 
 import collect_configs
+import remove_duplicate_configs
 
 
 def main():
@@ -11,31 +12,47 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     subparsers.required = True
 
-    # --- 'collect' command ---
-    collect_parser = subparsers.add_parser("collect", help="Run the collection process")
+    collect_parser = subparsers.add_parser(
+        "collect", help="Collect configs from telegram channels"
+    )
 
-    # 1. --channels (Flag, required)
     collect_parser.add_argument(
         "--channels",
-        required=True,  # Makes this mandatory
+        required=True,
         type=str,
         help="Path of the channels file",
     )
-
-    # 2. --hours-back (Flag, required)
     collect_parser.add_argument(
         "--hours-back", required=True, type=int, help="Number of hours to go back"
     )
-
-    # 3. --output (Flag, required)
     collect_parser.add_argument(
         "--output", required=True, type=str, help="Path for the output file"
+    )
+
+    clean_configs_parser = subparsers.add_parser(
+        "clean-configs", help="Clean configs, remove duplicates"
+    )
+
+    clean_configs_parser.add_argument(
+        "--configs",
+        required=True,
+        type=str,
+        help="Path of the raw configs file",
+    )
+    clean_configs_parser.add_argument(
+        "--output",
+        required=True,
+        type=str,
+        help="Path to save cleaned configs",
     )
 
     args = parser.parse_args()
 
     if args.command == "collect":
         collect_configs.run(args.channels, args.hours_back, args.output)
+    elif args.command == "clean-configs":
+        print("clean-conifgs command")
+        remove_duplicate_configs.run(args.configs, args.output)
 
 
 init(autoreset=True)
