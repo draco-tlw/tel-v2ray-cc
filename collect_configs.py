@@ -104,7 +104,9 @@ async def collect_channel_configs(
         return channel_configs
 
 
-async def collect_all_channels_configs(channels: list[str], hours_back: int):
+async def collect_all_channels_configs(
+    channels: list[str], hours_back: int, output_file: str = OUTPUT_FILE
+):
     cutoff_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
         hours=hours_back
     )
@@ -135,14 +137,19 @@ async def collect_all_channels_configs(channels: list[str], hours_back: int):
                 total_configs_found += count
                 channels_with_configs += 1
 
-                with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
+                with open(output_file, "a", encoding="utf-8") as f:
                     for config in result:
                         f.write(config + "\n")
 
     print("\nCollection Complete!")
     print(f"   • Channels with configs: {channels_with_configs}")
     print(f"   • Total configs saved:   {total_configs_found}")
-    print(f"   • Saved to:              {OUTPUT_FILE}")
+    print(f"   • Saved to:              {output_file}")
+
+
+def run(channels_file: str, hours_back: int, output_file: str):
+    channels = read_channels(channels_file)
+    asyncio.run(collect_all_channels_configs(channels, hours_back, output_file))
 
 
 async def main():
