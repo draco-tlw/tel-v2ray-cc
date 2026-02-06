@@ -4,6 +4,7 @@ import sys
 from colorama import Fore, Style, init
 
 import check_channels
+import clean_channel_list
 import collect_configs
 import extract_channels
 import remove_duplicate_configs
@@ -106,6 +107,24 @@ def main():
         "--output", required=True, type=str, help="Path for the output file"
     )
 
+    clean_channels_parser = subparsers.add_parser(
+        "clean-channels",
+        help="Clean channels list, remove duplicates, sort, convert to lowercase letters",
+    )
+
+    clean_channels_parser.add_argument(
+        "--channels",
+        required=True,
+        type=str,
+        help="Path of the raw channels file",
+    )
+    clean_channels_parser.add_argument(
+        "--output",
+        required=True,
+        type=str,
+        help="Path to save cleaned channels list",
+    )
+
     args = parser.parse_args()
 
     if args.command == "collect":
@@ -118,6 +137,8 @@ def main():
         extract_channels.run(args.channels, args.days_back, args.output)
     elif args.command == "check":
         check_channels.run(args.channels, args.days_back, args.output)
+    elif args.command == "clean-channels":
+        clean_channel_list.run(args.channels, args.output)
 
 
 init(autoreset=True)

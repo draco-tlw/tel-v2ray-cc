@@ -4,11 +4,11 @@ CHANNELS_FILE = "./channels.txt"
 OUTPUT_FILE = "clean-channels.txt"
 
 
-def main():
+def clean(channels_file: str = CHANNELS_FILE, output_file: str = OUTPUT_FILE):
     print("--- Channel Cleanup ---")
-    print(f"Reading from: {CHANNELS_FILE}")
+    print(f"Reading from: {channels_file}")
 
-    channels = read_channels(CHANNELS_FILE)
+    channels = read_channels(channels_file)
 
     if channels:
         raw_count = len(channels)
@@ -26,15 +26,19 @@ def main():
         print(f"   • Unique channels:    {unique_count}")
 
         # Save
-        print(f"Saving to: {OUTPUT_FILE}")
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        print(f"Saving to: {output_file}")
+        with open(output_file, "w", encoding="utf-8") as f:
             for channel in channels:
                 f.write(channel + "\n")
 
         print("\nSuccess! List cleaned and sorted.")
     else:
-        print(f"No channels found in {CHANNELS_FILE} (or file is missing).")
+        print(f"No channels found in {output_file} (or file is missing).")
+
+
+def run(channels_file: str, output_file: str):
+    clean(channels_file, output_file)
 
 
 if __name__ == "__main__":
-    main()
+    clean()
