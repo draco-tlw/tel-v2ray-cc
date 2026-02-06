@@ -1,150 +1,153 @@
 import asyncio
-import os
+import datetime
 import random
 import re
 
-import socks
-from dotenv import load_dotenv
-from telethon import TelegramClient, errors
+import aiohttp
+from aiohttp_socks import ProxyConnector
 
-from services import fingerprint, parse_date, read_channels, renamer
+from models.v2ray_config import CONFIG_PATTERN
+from services import renamer
+from services.read_channels import read_channels
+from services.telegram_web_scraping import (
+    get_message_datetime,
+    get_message_id,
+    get_message_text,
+    load_channel_messages,
+)
 
-load_dotenv()
+PROXY_URL = "socks5://127.0.0.1:12334"
+MAX_CONCURRENT_SCANS = 20
+MAX_PAGES = 100
+OUTPUT_FILE = "configs.txt"
 
-API_ID = os.getenv("API_ID")
-API_HASH = os.getenv("API_HASH")
-SESSION_NAME = "my_collector_session"
-TARGET_CHANNELS = "./channels.txt"
-
-assert API_ID is not None
-assert API_HASH is not None
-
-API_ID = int(API_ID)
-
-PROXY_CONF = (socks.SOCKS5, "127.0.0.1", 12334)
-
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH, proxy=PROXY_CONF)
-
-
-CONFIG_PATTERN = r"(?:vmess|vless|trojan|ss|tuic|hysteria2?)://[a-zA-Z0-9\-_@.:?=&%#]+"
-MAX_CONCURRENT_SCANS = 5
+SOURCE_CHANNELS_FILE = "./channels.txt"
+HOURS_BACK = 24
 
 
-async def scan_channels(
-    client: TelegramClient,
+async def collect_channel_configs(
     channel: str,
-    start_date,
-    end_date,
+    cutoff_date: datetime.datetime,
+    session: aiohttp.ClientSession,
     semaphore: asyncio.Semaphore,
 ):
     async with semaphore:
-        delay = random.uniform(1.5, 4.5)
+        delay = random.uniform(1.5, 4.0)
         await asyncio.sleep(delay)
 
-        channel_configs = set()
+        channel_configs: set[str] = set()
 
-        try:
-            entity = await client.get_input_entity(channel)
+        last_msg_datetime = datetime.datetime.now(datetime.timezone.utc)
+        next_offset_id = None
 
-            async for message in client.iter_messages(entity, offset_date=end_date):
-                if message.date < start_date:
+        for page_num in range(MAX_PAGES):
+            if last_msg_datetime < cutoff_date:
+                break
+
+            messages = await load_channel_messages(channel, session, next_offset_id)
+
+            if not messages:
+                if page_num == 0:
+                    print(
+                        f"✗ {channel:<30} | Restricted (No Web Preview) or Private Channel"
+                    )
+                    return channel_configs
+                else:
                     break
 
-                if message.text:
-                    found = re.findall(CONFIG_PATTERN, message.text)
+            for msg in messages:
+                msg_datetime = get_message_datetime(msg)
+
+                if not msg_datetime:
+                    continue
+
+                if msg_datetime < cutoff_date:
+                    if len(channel_configs) > 0:
+                        print(f"✓ {channel:<30} | Found: {len(channel_configs)}")
+                    else:
+                        print(f"- {channel:<30} | Found: 0")
+                    return channel_configs
+
+                msg_text = get_message_text(msg)
+                if msg_text:
+                    found = re.findall(CONFIG_PATTERN, msg_text)
                     for config in found:
+                        config = config.rstrip(".:,;!?")
+
                         renamed_config = renamer.rename_config(config, channel)
-                        channel_configs.add(renamed_config)
+                        channel_configs.add(str(renamed_config))
 
-            count = len(channel_configs)
-            if count > 0:
-                print(f"✓ {channel:<30} | Found: {count}")
-            else:
-                print(f"- {channel:<30} | Found: 0")
+            last_msg_datetime = None
+            next_offset_id = None
 
-            return channel_configs
+            for msg in reversed(messages):
+                p_id = get_message_id(msg)
+                p_date = get_message_datetime(msg)
 
-        except errors.FloodWaitError as e:
-            # SAFETY: If ban is long (>2 mins), skip the channel
-            print(f"! {channel:<30} | FloodWait {e.seconds}s detected.")
-            if e.seconds > 120:
-                print("   !! SKIPPING to avoid long ban.")
-                return None
+                if p_id and p_date:
+                    next_offset_id = p_id
+                    last_msg_datetime = p_date
+                    break
 
-            # If short wait, we sleep and skip this turn
-            await asyncio.sleep(e.seconds)
-            return None
+            delay = random.uniform(0.5, 1.5)
+            await asyncio.sleep(delay)
 
-        except Exception as e:
-            error_msg = str(e).split("(")[0]  # Shorten error message
-            print(f"✗ {channel:<30} | Error: {error_msg}")
-            return set()
+            if not last_msg_datetime or not next_offset_id:
+                break
 
+        count = len(channel_configs)
+        if count > 0:
+            print(f"✓ {channel:<30} | Found: {count}")
+        else:
+            print(f"- {channel:<30} | Found: 0")
 
-async def collect(start_time_str: str, end_time_str: str):
-    async with client:
-        start_date, end_date = parse_date.parse_dates(start_time_str, end_time_str)
-        print(f"--- Collecting Configs from {start_date} to {end_date} (UTC) ---")
-        print("Scanning channels...")
-
-        target_channels = read_channels.read_channels(TARGET_CHANNELS)
-
-        sem = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
-
-        tasks = []
-        for channel in target_channels:
-            task = scan_channels(client, channel, start_date, end_date, sem)
-            tasks.append(task)
-
-        results = await asyncio.gather(*tasks)
-
-        collected_configs = set()
-        for channel_result in results:
-            collected_configs.update(channel_result)
-
-        print(f"\nScanning complete! Found {len(collected_configs)} configs.")
-        return list(collected_configs)
+        return channel_configs
 
 
-def remove_duplicates(configs: list[str]):
-    unique_configs = {}
-
-    for config in configs:
-        fgp = fingerprint.generate_fingerprint(config)
-
-        if not fgp:
-            continue  # Skip invalid configs
-
-        # Check if this ID exists in our database
-        if fgp not in unique_configs:
-            unique_configs[fgp] = config
-
-    # Calculate stats
-    initial_count = len(configs)
-    unique_count = len(unique_configs)
-    duplicates_count = initial_count - unique_count
-
-    print(
-        f"➤ Deduplication Report: Processed {initial_count} configs. Kept {unique_count} unique. Removed {duplicates_count} duplicates."
+async def collect_all_channels_configs(channels: list[str], hours_back: int):
+    cutoff_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+        hours=hours_back
     )
 
-    return list(unique_configs.values())
+    print(f"--- Collecting Configs from {len(channels)} Channels ---")
+    print(f"--- Cutoff Date: {cutoff_date.strftime('%Y-%m-%d %H:%M:%S UTC')} ---")
+
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        f.write("")
+
+    connector = ProxyConnector.from_url(PROXY_URL)
+    sem = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
+
+    async with aiohttp.ClientSession(connector=connector) as session:
+        tasks = []
+        for channel in channels:
+            task = collect_channel_configs(channel, cutoff_date, session, sem)
+            tasks.append(task)
+
+        total_configs_found = 0
+        channels_with_configs = 0
+
+        for future in asyncio.as_completed(tasks):
+            result = await future
+
+            if result:
+                count = len(result)
+                total_configs_found += count
+                channels_with_configs += 1
+
+                with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
+                    for config in result:
+                        f.write(config + "\n")
+
+    print("\nCollection Complete!")
+    print(f"   • Channels with configs: {channels_with_configs}")
+    print(f"   • Total configs saved:   {total_configs_found}")
+    print(f"   • Saved to:              {OUTPUT_FILE}")
 
 
 async def main():
-    print("Enter the time window (YYYY-MM-DD-HH:mm)")
-    start_str = input("start time: ")
-    end_str = input("end time: ")
-
-    configs = await collect(start_str, end_str)
-
-    clean_configs = remove_duplicates(configs)
-
-    with open("configs.txt", "w", encoding="utf-8") as f:
-        for config in clean_configs:
-            f.write(config + "\n")
-
-    print("saved to configs.txt")
+    channels = read_channels(SOURCE_CHANNELS_FILE)
+    await collect_all_channels_configs(channels, hours_back=HOURS_BACK)
 
 
 if __name__ == "__main__":
