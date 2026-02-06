@@ -3,6 +3,7 @@ import sys
 
 from colorama import Fore, Style, init
 
+import check_channels
 import collect_configs
 import extract_channels
 import remove_duplicate_configs
@@ -88,6 +89,23 @@ def main():
         "--output", required=True, type=str, help="Path for the output file"
     )
 
+    check_parser = subparsers.add_parser(
+        "check", help="Verify if the provided channels contain V2Ray configurations."
+    )
+
+    check_parser.add_argument(
+        "--channels",
+        required=True,
+        type=str,
+        help="Path of the channels file",
+    )
+    check_parser.add_argument(
+        "--days-back", required=True, type=int, help="Number of days to go back"
+    )
+    check_parser.add_argument(
+        "--output", required=True, type=str, help="Path for the output file"
+    )
+
     args = parser.parse_args()
 
     if args.command == "collect":
@@ -98,6 +116,8 @@ def main():
         test_latency.run(args.configs, args.output, args.result)
     elif args.command == "extract":
         extract_channels.run(args.channels, args.days_back, args.output)
+    elif args.command == "check":
+        check_channels.run(args.channels, args.days_back, args.output)
 
 
 init(autoreset=True)
