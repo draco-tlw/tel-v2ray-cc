@@ -150,6 +150,19 @@ def is_valid_base64_key(key_str, required_len=None):
         return False
 
 
+VALID_FINGERPRINTS = {
+    "chrome",
+    "firefox",
+    "edge",
+    "safari",
+    "360",
+    "qq",
+    "ios",
+    "android",
+    "randomized",
+}
+
+
 def filter_supported_v2ray_configs(configs: list[V2rayConfig]):
     valid_configs: list[V2rayConfig] = []
 
@@ -157,7 +170,14 @@ def filter_supported_v2ray_configs(configs: list[V2rayConfig]):
         try:
             p = config.parsed_data
 
-            if not p.get("server") or not p.get("server_port"):
+            if not p.get("server"):
+                continue
+
+            try:
+                port = int(p.get("server_port", 0))
+                if not (1 <= port <= 65535):
+                    continue
+            except ValueError:
                 continue
 
             if p["type"] == "shadowsocks":
@@ -186,7 +206,24 @@ def filter_supported_v2ray_configs(configs: list[V2rayConfig]):
                 if t_type == "xhttp":
                     continue
 
+                if t_type in ["ws", "httpupgrade"]:
+                    path = p["transport"].get("path", "")
+
+                    if re.search(r"%(?![0-9a-fA-F]{2})", path):
+                        continue
+
             if "tls" in p and p["tls"]:
+
+                if "utls" in p["tls"]:
+                    fp = p["tls"]["utls"].get("fingerprint", "").lower()
+
+                    if fp == "random":
+                        p["tls"]["utls"]["fingerprint"] = "randomized"
+                        fp = "randomized"
+
+                    if fp and fp not in VALID_FINGERPRINTS:
+                        del p["tls"]["utls"]
+
                 if "reality" in p["tls"]:
                     reality = p["tls"]["reality"]
                     pbk = reality.get("public_key", "")
